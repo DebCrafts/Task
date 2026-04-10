@@ -1,0 +1,151 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+    
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+    
+    // ===============================================================
+    // Users Collection
+    // ===============================================================
+    match /users/{userId} {
+      // Anyone authenticated can read user profiles (needed for avatars/names)
+      allow read: if isAuthenticated();
+      
+      // Users can only create/update their own profile
+      allow create, update: if isOwner(userId)
+        && hasRequiredFields(['uid', 'displayName', 'email'])
+        && request.resource.data.uid == userId
+        && isValidString(request.resource.data.displayName, 1, 100)
+        && isValidString(request.resource.data.email, 3, 100);
+        
+      allow delete: if false; // Don't allow deletion for now
+    }
+    
+    // ===============================================================
+    // Tasks Collection
+    // ===============================================================
+    match /tasks/{taskId} {
+      function canReadTask(data) {
+        return isAuthenticated() && (
+          data.ownerId == request.auth.uid || 
+          (data.sharedWithIds != null && request.auth.uid in data.sharedWithIds)
+        );
+      }
+      
+      function canEditTask(data) {
+        return isAuthenticated() && (
+          data.ownerId == request.auth.uid || 
+          data.sharedWith[request.auth.uid] == 'edit'
+        );
+      }
+      
+      function isValidTask(data) {
+        return hasRequiredFields(['ownerId', 'title', 'completed', 'priority', 'createdAt'])
+          && isValidString(data.title, 1, 500)
+          && data.priority in ['low', 'medium', 'high']
+          && data.completed is bool;
+      }
+      
+      allow read: if canReadTask(resource.data);
+      
+      allow create: if isAuthenticated() 
+        && request.resource.data.ownerId == request.auth.uid
+        && isValidTask(request.resource.data);
+        
+      allow update: if canEditTask(resource.data)
+        && isValidTask(request.resource.data)
+        // If not owner, cannot change ownerId, sharedWith, or sharedWithIds
+        && (request.auth.uid == resource.data.ownerId || (
+             request.resource.data.ownerId == resource.data.ownerId &&
+             request.resource.data.sharedWith == resource.data.sharedWith &&
+             request.resource.data.sharedWithIds == resource.data.sharedWithIds
+           ));
+           
+      allow delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+    }
+    
+    // ===============================================================
+    // Categories Collection
+    // ===============================================================
+    match /categories/{categoryId} {
+      function canReadCategory(data) {
+        return isAuthenticated() && (
+          data.ownerId == request.auth.uid || 
+          (data.sharedWithIds != null && request.auth.uid in data.sharedWithIds)
+        );
+      }
+      
+      function canEditCategory(data) {
+        return isAuthenticated() && (
+          data.ownerId == request.auth.uid || 
+          data.sharedWith[request.auth.uid] == 'edit'
+        );
+      }
+      
+      function isValidCategory(data) {
+        return hasRequiredFields(['ownerId', 'name', 'color', 'createdAt'])
+          && isValidString(data.name, 1, 100)
+          && isValidString(data.color, 1, 50);
+      }
+      
+      allow read: if canReadCategory(resource.data);
+      
+      allow create: if isAuthenticated() 
+        && request.resource.data.ownerId == request.auth.uid
+        && isValidCategory(request.resource.data);
+        
+      allow update: if canEditCategory(resource.data)
+        && isValidCategory(request.resource.data)
+        // If not owner, cannot change ownerId, sharedWith, or sharedWithIds
+        && (request.auth.uid == resource.data.ownerId || (
+             request.resource.data.ownerId == resource.data.ownerId &&
+             request.resource.data.sharedWith == resource.data.sharedWith &&
+             request.resource.data.sharedWithIds == resource.data.sharedWithIds
+           ));
+           
+      allow delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+    }
+    
+    // ===============================================================
+    // Activities Collection
+    // ===============================================================
+    match /activities/{activityId} {
+      function getTask(taskId) {
+        return get(/databases/$(database)/documents/tasks/$(taskId)).data;
+      }
+      
+      allow read: if isAuthenticated() && (
+        getTask(resource.data.taskId).ownerId == request.auth.uid ||
+        request.auth.uid in getTask(resource.data.taskId).sharedWith
+      );
+      
+      allow create: if isAuthenticated() 
+        && hasRequiredFields(['taskId', 'userId', 'action', 'timestamp'])
+        && request.resource.data.userId == request.auth.uid
+        && (
+          getTask(request.resource.data.taskId).ownerId == request.auth.uid ||
+          getTask(request.resource.data.taskId).sharedWith[request.auth.uid] == 'edit'
+        );
+        
+      allow update, delete: if false; // Activities are immutable
+    }
+  }
+}
