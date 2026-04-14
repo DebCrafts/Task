@@ -48,7 +48,8 @@ export function Sidebar({ onClose }: SidebarProps) {
       if (err?.code === 'auth/popup-closed-by-user') {
         // User intentionally closed the popup, no need to show an error
       } else if (err?.code === 'auth/unauthorized-domain') {
-        setError("This domain is not authorized for sign-in. Please add your Vercel URL to the 'Authorized Domains' list in the Firebase Console (Authentication > Settings).");
+        const currentDomain = window.location.hostname;
+        setError(`This domain (${currentDomain}) is not authorized for sign-in. Please add it to the 'Authorized Domains' list in the Firebase Console (Authentication > Settings).`);
       } else {
         setError(err?.message || "Failed to sign in.");
       }
